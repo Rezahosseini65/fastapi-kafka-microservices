@@ -1,0 +1,10 @@
+[project]
+name = "user-service"
+version = "0.1.0"
+description = "User microservice"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+]
