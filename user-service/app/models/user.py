@@ -28,5 +28,8 @@ class User(Base):
         index=True,
     )
 
-    def __repr__(self):
-        return f"User(id={self.id!r}, name={self.name!r}"
+    def __repr__(self)-> str:
+        return f"User(id={self.id!r}, name={self.name!r})"
+
+
+__all__ = ["User"]
