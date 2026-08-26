@@ -3,6 +3,7 @@ from fastapi import (
     Depends,
     HTTPException,
     status,
+    Path
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -70,3 +71,26 @@ async def get_users(
     users = result.scalars().all()
 
     return users
+
+
+@router.get(
+        "/{user_id}/",
+        response_model=UserResponseSchema
+)
+async def get_user(
+    user_id: int = Path(...),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(User).where(User.id==user_id)
+    )
+
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    return user
