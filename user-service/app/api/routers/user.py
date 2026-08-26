@@ -54,3 +54,19 @@ async def create_user(
     await db.refresh(user_obj)
 
     return user_obj
+
+
+@router.get(
+    "/", 
+    response_model=list[UserResponseSchema]
+)
+async def get_users(
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(User).order_by(User.id)
+    )
+
+    users = result.scalars().all()
+
+    return users
