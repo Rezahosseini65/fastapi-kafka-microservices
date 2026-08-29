@@ -3,7 +3,8 @@ from fastapi import (
     Depends,
     HTTPException,
     status,
-    Path
+    Path,
+    Body
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,7 @@ from app.models.user import User
 from app.schemas.user import (
     UserCreateSchema,
     UserResponseSchema,
+    UserUpdateSchema,
 )
 
 router = APIRouter(
@@ -92,5 +94,54 @@ async def get_user(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="User not found",
         )
+
+    return user
+
+
+@router.patch("/{user_id}", response_model=UserResponseSchema)
+async def update_user(
+    user_id: int = Path(...),
+    request: UserUpdateSchema = Body(...),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(User).where(User.id==user_id)
+    )
+
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    update_data = request.model_dump(exclude_unset=True)
+
+    if "name" in update_data:
+        user.name = update_data["name"].strip()
+
+    if "email" in update_data:
+        normalized_email = update_data["email"].lower()
+
+        result = await db.execute(
+            select(User).where(
+                User.email == normalized_email,
+                User.id != user_id,
+            )
+        )
+
+        existing_user = result.scalar_one_or_none()
+
+        if existing_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Email already exists",
+            )
+
+        user.email = normalized_email
+
+    await db.commit()
+    await db.refresh(user)
 
     return user
