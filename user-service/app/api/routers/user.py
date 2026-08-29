@@ -145,3 +145,29 @@ async def update_user(
     await db.refresh(user)
 
     return user
+
+
+@router.delete("/{user_id}")
+async def delete_user(
+    user_id: int = Path(...),
+    db: AsyncSession = Depends(get_db)
+):
+    result = await db.execute(
+        select(User).where(User.id==user_id)
+    )
+
+    user = result.scalar_one_or_none()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    await db.delete(user)
+    await db.commit()
+
+
+    return {
+        "message": "user removed successfully"
+    }
