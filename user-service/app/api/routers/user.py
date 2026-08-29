@@ -7,6 +7,7 @@ from fastapi import (
     Body
 )
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -53,7 +54,15 @@ async def create_user(
 
     db.add(user_obj)
 
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already exists",
+        )
+    
     await db.refresh(user_obj)
 
     return user_obj
@@ -141,7 +150,15 @@ async def update_user(
 
         user.email = normalized_email
 
-    await db.commit()
+    try:
+        await db.commit()
+    except:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already exists",
+        )
+    
     await db.refresh(user)
 
     return user
