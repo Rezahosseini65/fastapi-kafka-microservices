@@ -107,7 +107,7 @@ async def get_user(
     return user
 
 
-@router.patch("/{user_id}", response_model=UserResponseSchema)
+@router.patch("/{user_id}/", response_model=UserResponseSchema)
 async def update_user(
     user_id: int = Path(...),
     request: UserUpdateSchema = Body(...),
@@ -164,7 +164,7 @@ async def update_user(
     return user
 
 
-@router.delete("/{user_id}")
+@router.delete("/{user_id}/")
 async def delete_user(
     user_id: int = Path(...),
     db: AsyncSession = Depends(get_db)

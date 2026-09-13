@@ -1,3 +1,5 @@
+import os
+
 from logging.config import fileConfig
 
 from alembic import context
@@ -17,11 +19,9 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-database_url = (
-    f"postgresql+asyncpg://"
-    f"{settings.postgres_user}:{settings.postgres_password}"
-    f"@{settings.postgres_host}:{settings.postgres_port}"
-    f"/{settings.postgres_db}"
+database_url = os.getenv(
+    "ALEMBIC_DATABASE_URL",
+    settings.database_url,
 )
 
 
