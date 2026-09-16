@@ -3,6 +3,7 @@ from fastapi import (
     Depends,
     HTTPException,
     status,
+    Request,
     Path,
     Body
 )
@@ -10,6 +11,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.kafka.producer import KafkaProducer
+from app.schemas.events import UserCreatedData, UserCreatedEvent
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.user import (
@@ -31,6 +34,7 @@ router = APIRouter(
 )
 async def create_user(
     request: UserCreateSchema,
+    http_request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -65,6 +69,21 @@ async def create_user(
     
     await db.refresh(user_obj)
 
+    event = UserCreatedEvent(
+        data=UserCreatedData(
+            id=user_obj.id,
+            name=user_obj.name,
+            email=user_obj.email
+        )
+    )
+
+    kafka_producer: KafkaProducer = http_request.app.state.kafka_producer
+
+    await kafka_producer.send(
+        topic="user-events",
+        value=event.to_bytes(),
+    )
+    
     return user_obj
 
 
