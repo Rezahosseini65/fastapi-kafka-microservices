@@ -12,13 +12,20 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.kafka.producer import KafkaProducer
-from app.schemas.events import UserCreatedData, UserCreatedEvent
 from app.db.session import get_db
 from app.models.user import User
 from app.schemas.user import (
     UserCreateSchema,
     UserResponseSchema,
     UserUpdateSchema,
+)
+from app.schemas.events import (
+    UserCreatedData, 
+    UserCreatedEvent,
+    UserUpdatedData,
+    UserUpdatedEvent,
+    UserDeletedData,
+    UserDeletedEvent
 )
 
 router = APIRouter(
@@ -128,6 +135,7 @@ async def get_user(
 
 @router.patch("/{user_id}/", response_model=UserResponseSchema)
 async def update_user(
+    http_request: Request,
     user_id: int = Path(...),
     request: UserUpdateSchema = Body(...),
     db: AsyncSession = Depends(get_db),
@@ -171,7 +179,7 @@ async def update_user(
 
     try:
         await db.commit()
-    except:
+    except IntegrityError:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -180,11 +188,27 @@ async def update_user(
     
     await db.refresh(user)
 
+    event = UserUpdatedEvent(
+        data=UserUpdatedData(
+            id=user.id,
+            name=user.name,
+            email=user.email
+        )
+    )
+
+    kafka_producer: KafkaProducer = http_request.app.state.kafka_producer
+
+    await kafka_producer.send(
+        topic="user-events",
+        value=event.to_bytes()
+    )
+
     return user
 
 
 @router.delete("/{user_id}/")
 async def delete_user(
+    http_request: Request,
     user_id: int = Path(...),
     db: AsyncSession = Depends(get_db)
 ):
@@ -200,9 +224,21 @@ async def delete_user(
             detail="User not found"
         )
 
+    user_id = user.id
+
     await db.delete(user)
     await db.commit()
 
+    event = UserDeletedEvent(
+        data=UserDeletedData(id=user_id)
+    )
+
+    kafka_producer: KafkaProducer = http_request.app.state.kafka_producer
+
+    await kafka_producer.send(
+        topic="user-events",
+        value=event.to_bytes()
+    ) 
 
     return {
         "message": "user removed successfully"
