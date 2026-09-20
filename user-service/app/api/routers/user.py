@@ -3,7 +3,6 @@ from fastapi import (
     Depends,
     HTTPException,
     status,
-    Request,
     Path,
     Body
 )
@@ -11,9 +10,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.kafka.producer import KafkaProducer
 from app.db.session import get_db
 from app.models.user import User
+from app.models.outbox_event import OutboxEvent
 from app.schemas.user import (
     UserCreateSchema,
     UserResponseSchema,
@@ -41,7 +40,6 @@ router = APIRouter(
 )
 async def create_user(
     request: UserCreateSchema,
-    http_request: Request,
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
@@ -66,31 +64,35 @@ async def create_user(
     db.add(user_obj)
 
     try:
+        await db.flush()
+
+        event = UserCreatedEvent(
+            data=UserCreatedData(
+                id=user_obj.id,
+                name=user_obj.name,
+                email=user_obj.email,
+            )
+        )
+
+        outbox_event = OutboxEvent(
+            event_id=event.event_id,
+            event_type=event.event_type,
+            payload=event.model_dump_json(),
+        )
+
+        db.add(outbox_event)
+
         await db.commit()
+
     except IntegrityError:
         await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already exists",
         )
-    
+
     await db.refresh(user_obj)
 
-    event = UserCreatedEvent(
-        data=UserCreatedData(
-            id=user_obj.id,
-            name=user_obj.name,
-            email=user_obj.email
-        )
-    )
-
-    kafka_producer: KafkaProducer = http_request.app.state.kafka_producer
-
-    await kafka_producer.send(
-        topic="user-events",
-        value=event.to_bytes(),
-    )
-    
     return user_obj
 
 
@@ -133,15 +135,17 @@ async def get_user(
     return user
 
 
-@router.patch("/{user_id}/", response_model=UserResponseSchema)
+@router.patch(
+    "/{user_id}/",
+    response_model=UserResponseSchema,
+)
 async def update_user(
-    http_request: Request,
     user_id: int = Path(...),
     request: UserUpdateSchema = Body(...),
     db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(User).where(User.id==user_id)
+        select(User).where(User.id == user_id)
     )
 
     user = result.scalar_one_or_none()
@@ -149,10 +153,12 @@ async def update_user(
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            detail="User not found",
         )
 
-    update_data = request.model_dump(exclude_unset=True)
+    update_data = request.model_dump(
+        exclude_unset=True,
+    )
 
     if "name" in update_data:
         user.name = update_data["name"].strip()
@@ -178,42 +184,46 @@ async def update_user(
         user.email = normalized_email
 
     try:
+        await db.flush()
+
+        event = UserUpdatedEvent(
+            data=UserUpdatedData(
+                id=user.id,
+                name=user.name,
+                email=user.email,
+            )
+        )
+
+        outbox_event = OutboxEvent(
+            event_id=event.event_id,
+            event_type=event.event_type,
+            payload=event.model_dump_json(),
+        )
+
+        db.add(outbox_event)
+
         await db.commit()
+
     except IntegrityError:
         await db.rollback()
+
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already exists",
         )
-    
+
     await db.refresh(user)
-
-    event = UserUpdatedEvent(
-        data=UserUpdatedData(
-            id=user.id,
-            name=user.name,
-            email=user.email
-        )
-    )
-
-    kafka_producer: KafkaProducer = http_request.app.state.kafka_producer
-
-    await kafka_producer.send(
-        topic="user-events",
-        value=event.to_bytes()
-    )
 
     return user
 
 
 @router.delete("/{user_id}/")
 async def delete_user(
-    http_request: Request,
     user_id: int = Path(...),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncSession = Depends(get_db),
 ):
     result = await db.execute(
-        select(User).where(User.id==user_id)
+        select(User).where(User.id == user_id)
     )
 
     user = result.scalar_one_or_none()
@@ -221,25 +231,38 @@ async def delete_user(
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
+            detail="User not found",
         )
 
-    user_id = user.id
+    deleted_user_id = user.id
 
-    await db.delete(user)
-    await db.commit()
+    try:
+        event = UserDeletedEvent(
+            data=UserDeletedData(
+                id=deleted_user_id,
+            )
+        )
 
-    event = UserDeletedEvent(
-        data=UserDeletedData(id=user_id)
-    )
+        outbox_event = OutboxEvent(
+            event_id=event.event_id,
+            event_type=event.event_type,
+            payload=event.model_dump_json(),
+        )
 
-    kafka_producer: KafkaProducer = http_request.app.state.kafka_producer
+        db.add(outbox_event)
 
-    await kafka_producer.send(
-        topic="user-events",
-        value=event.to_bytes()
-    ) 
+        await db.delete(user)
+
+        await db.commit()
+
+    except IntegrityError:
+        await db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Could not delete user",
+        )
 
     return {
-        "message": "user removed successfully"
+        "message": "user removed successfully",
     }
