@@ -34,15 +34,20 @@ class OutboxPublisher:
         published_count = 0
 
         for event in events:
-            await self.producer.send(
-                topic=self.topic,
-                value=event.payload.encode("utf-8")
-            )
+            try:
+                await self.producer.send(
+                    topic=self.topic,
+                    value=event.payload.encode("utf-8")
+                )
 
-            event.published_at = datetime.now(timezone.utc)
+                event.published_at = datetime.now(timezone.utc)
 
-            await db.commit()
+                await db.commit()
 
-            published_count += 1
+                published_count += 1
+
+            except Exception:
+                await db.rollback()
+                raise
 
         return published_count 
