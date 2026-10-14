@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import (
 from httpx import ASGITransport, AsyncClient
 
 from app.models.user import User
+from app.models.outbox_event import OutboxEvent
 from tests.config import test_settings
 from app.main import create_app
 from app.db.session import get_db
@@ -30,6 +31,7 @@ async def db_session():
         try:
             yield session
         finally:
+            await session.execute(delete(OutboxEvent))
             await session.execute(delete(User))
             await session.commit()
 

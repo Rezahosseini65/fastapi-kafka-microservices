@@ -10,44 +10,47 @@ from app.models.outbox_event import OutboxEvent
 class OutboxPublisher:
     def __init__(
         self,
-        producer:KafkaProducer,
-        topic:str
+        producer: KafkaProducer,
+        topic: str,
     ):
         self.producer = producer
         self.topic = topic
 
     async def publish_pending_events(
-            self,
-            db:AsyncSession,
-            batch_size=100
-    )-> int:
-        result = await db.execute(
-            select(OutboxEvent).where(
-                OutboxEvent.published_at.is_(None)
+        self,
+        db: AsyncSession,
+        batch_size: int = 100,
+    ) -> int:
+        try:
+            result = await db.execute(
+                select(OutboxEvent)
+                .where(
+                    OutboxEvent.published_at.is_(None),
+                )
+                .order_by(OutboxEvent.id)
+                .limit(batch_size)
+                .with_for_update(skip_locked=True)
             )
-            .order_by(OutboxEvent.id)
-            .limit(batch_size)
-        )
 
-        events = result.scalars().all()
+            events = result.scalars().all()
 
-        published_count = 0
+            published_count = 0
 
-        for event in events:
-            try:
+            for event in events:
                 await self.producer.send(
                     topic=self.topic,
-                    value=event.payload.encode("utf-8")
+                    value=event.payload.encode("utf-8"),
                 )
 
                 event.published_at = datetime.now(timezone.utc)
-
-                await db.commit()
-
                 published_count += 1
 
-            except Exception:
-                await db.rollback()
-                raise
+            if published_count:
+                await db.commit()
 
-        return published_count 
+            return published_count
+
+        except Exception:
+            await db.rollback()
+            raise
+        
