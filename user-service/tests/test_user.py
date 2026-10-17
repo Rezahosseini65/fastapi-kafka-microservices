@@ -1,4 +1,8 @@
 import pytest
+from sqlalchemy import select
+
+from app.models.outbox_event import OutboxEvent
+from app.models.user import User
 
 @pytest.mark.asyncio # اجرای متد به صورت غیر همزمان
 async def test_create_app(client):
@@ -274,3 +278,42 @@ async def test_delete_user_not_found(client):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "User not found"  
+
+@pytest.mark.asyncio
+async def test_create_user_rolls_back_when_commit_fails(
+    client,
+    db_session,
+    monkeypatch,
+):
+    async def failing_commit():
+        raise RuntimeError("Simulated database failure")
+
+    # شبیه‌سازی خطا هنگام commit دیتابیس
+    monkeypatch.setattr(db_session, "commit", failing_commit)
+
+    # درخواست باید با خطای شبیه‌سازی‌شده مواجه شود
+    with pytest.raises(
+        RuntimeError,
+        match="Simulated database failure",
+    ):
+        await client.post(
+            "/api/users/create/",
+            json={
+                "name": "Rollback User",
+                "email": "rollback@example.com",
+            },
+        )
+
+    # بررسی می‌کنیم کاربر در دیتابیس ذخیره نشده باشد
+    result = await db_session.execute(
+        select(User).where(User.email == "rollback@example.com")
+    )
+    assert result.scalar_one_or_none() is None
+
+    # بررسی می‌کنیم رویداد Outbox هم ذخیره نشده باشد
+    result = await db_session.execute(
+        select(OutboxEvent).where(
+            OutboxEvent.payload.contains("rollback@example.com")
+        )
+    )
+    assert result.scalar_one_or_none() is None

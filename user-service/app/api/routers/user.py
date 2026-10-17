@@ -91,6 +91,10 @@ async def create_user(
             detail="Email already exists",
         )
 
+    except Exception:
+        await db.rollback()
+        raise
+
     await db.refresh(user_obj)
 
     return user_obj
